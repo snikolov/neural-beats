@@ -1,6 +1,15 @@
-from mido import MidiFile
-from midi_util import get_quantized_note_times
+from midi_util import quantize_track
+from tests import *
 
 def test_quantize():
-    mid = MidiFile('/Users/snikolov/Downloads/groove-monkee-midi-gm/Twisted/Rock/080 Rock Toms 1 F2.mid')
-    get_quantized_note_times(mid.tracks[1], mid.ticks_per_beat, 5)
+    qtrack0 = quantize_track(track0, 240, 5)
+    print qtrack0[0].time
+    print qtrack0[1].time
+    assert qtrack0[0].time == 0
+    assert qtrack0[1].time == 50
+    
+    qtrack1 = quantize_track(track1, 240, 5)
+    print qtrack1[0].time
+    print qtrack1[1].time
+    assert qtrack1[0].time == 0
+    assert qtrack1[1].time == 50
