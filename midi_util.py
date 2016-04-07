@@ -176,3 +176,17 @@ def nearest_pow2(x):
     else:
         nearest = low
     return nearest
+
+
+def print_array(array):
+    '''Print a binary array representing midi notes.'''
+
+    res = ''
+    for slice in array:
+        for pitch in slice:
+            if pitch > 0:
+                res += 'O'
+            else:
+                res += '-'
+        res += '\n'
+    print res
