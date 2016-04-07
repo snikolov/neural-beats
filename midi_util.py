@@ -189,4 +189,5 @@ def print_array(array):
             else:
                 res += '-'
         res += '\n'
-    print res
+    # Take out the last newline
+    print res[:-1]

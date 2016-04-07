@@ -20,18 +20,19 @@ NUM_HIDDEN_UNITS = NUM_PITCHES * HIDDEN_UNITS_PER_PITCH
 PHRASE_LEN = 32
 
 NUM_ITERATIONS = 60
-BATCH_SIZE = 128
+BATCH_SIZE = 64
 
 # Load the data.
 # Concatenate all the vectorized midi files.
 num_steps = 0
-base_dir = '/Users/snikolov/Downloads/groove-monkee-midi-gm'
+#base_dir = '/Users/snikolov/Downloads/groove-monkee-midi-gm/array'
+base_dir = '/home/ubuntu/neural-beats/midi_arrays/'
 arrays = []
-for root, dirs, files in os.walk(os.path.join(base_dir, 'array')):
+for root, dirs, files in os.walk(base_dir):
     for filename in files:
         if filename.split('.')[-1] == 'npy':
             array = np.load(os.path.join(root, filename))
-            arrays.append(array)
+            arrays.append(array[:, PITCH_RANGE[0] : PITCH_RANGE[1]])
 seq = np.concatenate(arrays, axis=0)
 
 # Construct labeled examples.
@@ -39,8 +40,8 @@ num_examples = seq.shape[0] - PHRASE_LEN
 X = np.zeros((num_examples, PHRASE_LEN, NUM_PITCHES), dtype=np.bool)
 y = np.zeros((num_examples, NUM_PITCHES), dtype=np.bool) 
 for i in xrange(num_examples):
-    X[i, :, :] = seq[i:i+PHRASE_LEN, PITCH_RANGE[0]:PITCH_RANGE[1]] > 0
-    y[i, :] = seq[i+PHRASE_LEN, PITCH_RANGE[0]:PITCH_RANGE[1]] > 0
+    X[i, :, :] = seq[i:i+PHRASE_LEN] > 0
+    y[i, :] = seq[i+PHRASE_LEN] > 0
 X = 1 * X
 y = 1 * y
 
@@ -88,7 +89,7 @@ def sample(preds, temperature=1.0):
 print('Training the model...')
 for i in range(NUM_ITERATIONS):
     model.fit(X, y, batch_size=BATCH_SIZE, nb_epoch=1)
-    start_index = random.randint(0, len(seq) - PHRASE_LEN - 1)
+    start_index = np.random.randint(0, len(seq) - PHRASE_LEN - 1)
     for temperature in [0.2, 0.5, 1.0, 1.2]:
         print()
         print('----- temperature:', temperature)
@@ -105,10 +106,10 @@ for i in range(NUM_ITERATIONS):
         print_array(generated)
 
         for i in range(400):
-            preds = model.predict(phrase, verbose=0)[0]
-            next_slice = sample(preds, temperature)
+            preds = model.predict(phrase[np.newaxis,:], verbose=0)[0]
+            next_slice = sample(preds, temperature)[np.newaxis,:]
 
-            generated += next_slice
+            generated = np.concatenate([generated, next_slice], axis=0)
             phrase = np.concatenate([phrase[1:], next_slice], axis=0)
 
             print_array(next_slice)
