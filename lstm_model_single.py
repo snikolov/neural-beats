@@ -11,11 +11,14 @@ from keras.layers.recurrent import LSTM
 from keras import backend as K
 import numpy as np
 
-from midi_util import print_array
+from midi_util import array_to_midi, print_array
 
 
+# The pitches we are paying attention to in the data
 # kick, snare, closed hihat, open hihat
 PITCHES = [36,38,42,51]
+# The pitches we want to generate (potentially different drum kit)
+OUT_PITCHES = [54,56,58,60]
 NUM_HIDDEN_UNITS = 128
 PHRASE_LEN = 32
 NUM_ITERATIONS = 60
@@ -29,27 +32,44 @@ encodings = {
     config : i
     for i, config in enumerate(itertools.product([0,1], repeat=len(PITCHES)))
 }
+
 decodings = {
     i : config
     for i, config in enumerate(itertools.product([0,1], repeat=len(PITCHES)))
 }
 
+
 def encode(midi_array):
+    '''Encode a folded MIDI array into a sequence of integers.'''
     return [
         encodings[tuple((time_slice>0).astype(int))]
         for time_slice in midi_array
     ]
 
+
 def decode(config_ids):
+    '''Decode a sequence of integers into a folded MIDI array.'''
     velocity = 120
     return velocity * np.vstack(
         [list(decodings[id]) for id in config_ids])
 
+
+def unfold(midi_array, pitches):
+    '''Unfold a folded MIDI array with the given pitches.'''
+    # Create an array of all the 128 pitches and fill in the
+    # corresponding pitches.
+    res = np.zeros((midi_array.shape[0], 128))
+    assert midi_array.shape[1] == len(pitches), 'Mapping between unequal number of pitches!'
+    for i in xrange(len(pitches)):
+        res[:,pitches[i]] = midi_array[:,i]
+    return res
+
+
 # Load the data.
 # Concatenate all the vectorized midi files.
 num_steps = 0
-base_dir = '/Users/snikolov/Downloads/groove-monkee-midi-gm/array'
-#base_dir = '/home/ubuntu/neural-beats/midi_arrays/'
+#base_dir = '/Users/snikolov/Downloads/groove-monkee-midi-gm/array'
+base_dir = '/home/ubuntu/neural-beats/midi_arrays/'
 # Sequence of configuration numbers representing combinations of
 # active pitches.
 config_seq = []
@@ -97,24 +117,37 @@ def sample(a, temperature=1.0):
 
 
 # Train the model
+
+midi_out_dir = '/home/ubuntu/neural-beats/midi-out'
+model_out_dir = '/home/ubuntu/neural-beats/models'
+model_name = 'model'
+if not os.path.exists(midi_out_dir):
+    os.makedirs(midi_out_dir)
+if not os.path.exists(model_out_dir):
+    os.makedirs(model_out_dir)
 print('Training the model...')
+
+LOAD_WEIGHTS = True
+if LOAD_WEIGHTS:
+    print('Loading previous weights...')
+    model.load_weights(os.path.join(model_out_dir, model_name))
+
 for i in range(NUM_ITERATIONS):
     model.fit(X, y, batch_size=BATCH_SIZE, nb_epoch=1)
     start_index = np.random.randint(0, len(config_seq) - PHRASE_LEN - 1)
     for temperature in [0.2, 0.5, 1.0, 1.2]:
-        print()
-        print('----- temperature:', temperature)
+        #print()
+        #print('----- temperature:', temperature)
 
         generated = []
-        phrase = config_seq[start_index: start_index + PHRASE_LEN]
-        generated += phrase
+        phrase = list(config_seq[start_index: start_index + PHRASE_LEN])
 
-        print('----- Generating with seed:')
-        pharse_array = decode(phrase)
+        #print('----- Generating with seed:')
+        phrase_array = decode(phrase)
         print_array(phrase_array)
-        print('-----')
+        #print('-----')
 
-        for i in range(512):
+        for j in range(512):
             x = np.zeros((1, PHRASE_LEN, 2**len(PITCHES)))
             for t, config_id in enumerate(phrase):
                 x[0, t, config_id] = 1
@@ -123,7 +156,9 @@ for i in range(NUM_ITERATIONS):
 
             generated += [next_id]
             phrase = phrase[1:] + [next_id]
-            print_array(decode([next_id]))
-        print()
-        mid = midi_util.array_to_midi(decode(generated))
-        mid.save('out_{}_{}.mid'.format(i,temperature))
+            #print_array(decode([next_id]))
+        #print()
+        mid_name = 'out_{}_{}.mid'.format(i,temperature)
+        mid = array_to_midi(unfold(decode(generated), OUT_PITCHES), mid_name)
+        mid.save(os.path.join(midi_out_dir, mid_name))
+    model.save_weights(os.path.join(model_out_dir, model_name), overwrite=True)
