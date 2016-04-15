@@ -105,7 +105,7 @@ for i in range(NUM_ITERATIONS):
         print('-----')
         print_array(generated)
 
-        for i in range(400):
+        for i in range(512):
             preds = model.predict(phrase[np.newaxis,:], verbose=0)[0]
             next_slice = sample(preds, temperature)[np.newaxis,:]
 
