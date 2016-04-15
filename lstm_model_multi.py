@@ -1,4 +1,5 @@
-'''Model a sequence of MIDI data.'''
+'''Model a sequence of MIDI data using an LSTM. Represent each point
+in the sequence as a binary vector representing active pitches.'''
 
 import os
 
