@@ -20,14 +20,14 @@ if __name__ == "__main__":
     # Handle case where a trailing / requires two splits.
     if len(path_suffix) == 0:
         path_prefix, path_suffix = os.path.split(path_prefix)
-    base_path_out = os.path.join(
-        path_prefix, 'quantized')
+    base_path_out = os.path.join(path_prefix, 'quantized')
+
     for root, dirs, files in os.walk(args.path):
         for file in files:
             if file.split('.')[-1] == 'mid':
                 mid = quantize(MidiFile(os.path.join(root,file)))
                 suffix = root.split(args.path)[-1]
-                out_dir = os.path.join(base_path_out, suffix)
+                out_dir = base_path_out + '/' + suffix
                 if not os.path.exists(out_dir):
                     os.makedirs(out_dir)
                 out_file = os.path.join(out_dir, file)
