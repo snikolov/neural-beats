@@ -95,7 +95,6 @@ def prepare_data():
             if filename.split('.')[-1] != 'npy':
                 continue
             array = np.load(os.path.join(root, filename))
-            print np.sum(np.sum(array[:, PITCHES]>0))
             if np.sum(np.sum(array[:, PITCHES]>0)) < MIN_HITS:
                 continue
             config_seq.extend(encode(array[:,PITCHES]))
@@ -212,6 +211,9 @@ def run():
     model = init_model()
     model.load_weights(os.path.join(MODEL_OUT_DIR, MODEL_NAME))
     seed = np.zeros((32, 4))
+
+    """
+    # Normal techno pattern
     seed[0,0] = 1 # Kick
     seed[4,2] = 1 # hat
     seed[8,0] = 1 # Kick
@@ -220,13 +222,21 @@ def run():
     seed[20,2] = 1 # hat
     seed[24,0] = 1 # Kick
     seed[28,2] = 1 # hat
+    """
+
+    # Broken beat / electro pattern
+    seed[0,0] = 1 # Kick
+    seed[8,1] = 1 # Snare
+    seed[12,0] = 1 # Kick
+    seed[24,1] = 1 # Snare
+    seed[30,1] = 1 # Snare
 
     length = 4096
     for temperature in [0.7,0.9,1.1]:
         for i in xrange(5):
             generate(model,
                      encode(seed),
-                     'out{}_{}_{}.mid'.format(length, temperature, i),
+                     'out_electro_{}_{}_{}.mid'.format(length, temperature, i),
                      temperature=1.1,
                      length=length)
 
