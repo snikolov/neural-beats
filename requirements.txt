@@ -1,3 +1,4 @@
 nose
 mido
 numpy
+h5py # Requires libhdf5-dev

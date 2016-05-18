@@ -16,13 +16,12 @@ from midi_util import array_to_midi, print_array
 
 np.random.seed(10)
 
-# The pitches we are paying attention to in the data
-# kick, snare, closed hihat, open hihat
-PITCHES = [36,38,42,51]
+# The pitches we are paying attention to in the dataxs
+PITCHES = [36,38,41,42,47,58,59,61]
 # The pitches we want to generate (potentially different drum kit)
-OUT_PITCHES = [54,56,58,60]
+OUT_PITCHES = [54,56,58,60,61,62,63,64]
 NUM_HIDDEN_UNITS = 128
-PHRASE_LEN = 32
+PHRASE_LEN = 512
 NUM_ITERATIONS = 60
 BATCH_SIZE = 64
 MIN_HITS = 8

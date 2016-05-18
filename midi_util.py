@@ -10,6 +10,22 @@ import numpy as np
 
 DEBUG = False
 
+# The MIDI pitches we use.
+PITCHES = [36, 37, 38, 40, 41, 42, 44, 45, 46, 47, 49, 50, 58, 59, 60, 61, 62, 63, 64, 66]
+PITCHES_MAP = { p : i for i, p in enumerate(PITCHES) }
+PITCHES_VERSION = '0.1'
+
+def get_note_track(mid):
+    '''Given a MIDI object, return the first track with note events.'''
+
+    for i, track in enumerate(mid.tracks):
+        for msg in track:
+            if msg.type == 'note_on':
+                return i, track
+    raise ValueError(
+        'MIDI object does not contain any tracks with note messages.')
+
+
 def quantize_tick(tick, ticks_per_quarter, quantization):
     '''Quantize the timestamp or tick.
 
@@ -38,15 +54,25 @@ def quantize_track(track, ticks_per_quarter, quantization):
       1/2**quantization.'''
 
     pp = pprint.PrettyPrinter()
+
     # Message timestamps are represented as differences between
     # consecutive events. Annotate messages with cumulative timestamps.
+
+    # Assume the following structure:
+    # [header meta messages] [note messages] [end_of_track message]
+    first_note_msg_idx = None
+    for i, msg in enumerate(track):
+        if msg.type == 'note_on':
+            first_note_msg_idx = i
+            break
+
     cum_msgs = zip(
-        np.cumsum([msg.time for msg in track[1:-1]]),
-        [msg for msg in track[1:-1]])
+        np.cumsum([msg.time for msg in track[first_note_msg_idx:]]),
+        [msg for msg in track[first_note_msg_idx:]])
+    end_of_track_cum_time = cum_msgs[-1][0]
 
     quantized_track = MidiTrack()
-    quantized_track.append(track[0])
-    quantized_track.append(track[-1])
+    quantized_track.extend(track[:first_note_msg_idx])
     # Keep track of note_on events that have not had an off event yet.
     # note number -> message
     open_msgs = defaultdict(list)
@@ -74,19 +100,23 @@ def quantize_track(track, ticks_per_quarter, quantization):
             # cumulative time of note_on plus the orginal difference
             # of the unquantized cumulative times.
             quantized_note_off_cum_time = quantized_note_on_cum_time + (cum_time - note_on_cum_time)
-            quantized_msgs.append((quantized_note_on_cum_time, note_on_msg))
-            quantized_msgs.append((quantized_note_off_cum_time, msg))
+            quantized_msgs.append((min(end_of_track_cum_time, quantized_note_on_cum_time), note_on_msg))
+            quantized_msgs.append((min(end_of_track_cum_time, quantized_note_off_cum_time), msg))
+        elif msg.type == 'end_of_track':
+            quantized_msgs.append((cum_time, msg))
 
     # Now, sort the quantized messages by (cumulative time,
     # note_type), making sure that note_on events come before note_off
     # events when two event have the same cumulative time. Compute
     # differential times and construct the quantized track messages.
     quantized_msgs.sort(
-        key=lambda (cum_time, msg): cum_time if (msg.type=='note_on' and msg.velocity > 0) else cum_time + 0.5)
+        key=lambda (cum_time, msg): cum_time
+        if (msg.type=='note_on' and msg.velocity > 0) else cum_time + 0.5)
+
     diff_times = [0] + list(
         np.diff([ msg[0] for msg in quantized_msgs ]))
     for diff_time, (cum_time, msg) in zip(diff_times, quantized_msgs):
-        quantized_track.insert(-2, msg.copy(time=diff_time))
+        quantized_track.append(msg.copy(time=diff_time))
     if DEBUG:
         pp.pprint(quantized_msgs)
         pp.pprint(diff_times)
@@ -105,8 +135,9 @@ def quantize(mid, quantization=5):
     quantized_mid = copy.deepcopy(mid)
     # By convention, Track 0 contains metadata and Track 1 contains
     # the note on and note off events.
-    quantized_mid.tracks[1] = quantize_track(
-        mid.tracks[1], mid.ticks_per_beat, quantization)
+    note_track_idx, note_track = get_note_track(mid)
+    quantized_mid.tracks[note_track_idx] = quantize_track(
+        note_track, mid.ticks_per_beat, quantization)
     return quantized_mid
 
 
@@ -131,7 +162,7 @@ def midi_to_array(mid, quantization):
     mid = quantize(mid, quantization=quantization)
 
     # Convert the note timing and velocity to an array.
-    track = mid.tracks[1]
+    _, track = get_note_track(mid)
     ticks_per_quarter = mid.ticks_per_beat
     
     time_msgs = [msg for msg in track if hasattr(msg, 'time')]
@@ -150,16 +181,17 @@ def midi_to_array(mid, quantization):
         print num_steps
         print normalized_num_steps
 
-    num_note_numbers = 128
-    midi_array = np.zeros((normalized_num_steps, num_note_numbers))
+    midi_array = np.zeros((normalized_num_steps, len(PITCHES)))
     for (position, note_num, velocity) in notes:
         if position == normalized_num_steps:
-            print 'Warning: truncating from position {} to {}'.format(position, normalized_num_steps - 1)
-            position = normalized_num_steps - 1
-        if position > normalized_num_steps:
-            print 'Warning: skipping note at position {} (greater than {})'.format(position, normalized_num_steps)
+            #print 'Warning: truncating from position {} to {}'.format(position, normalized_num_steps - 1)
             continue
-        midi_array[position, note_num] = velocity
+            #position = normalized_num_steps - 1
+        if position > normalized_num_steps:
+            #print 'Warning: skipping note at position {} (greater than {})'.format(position, normalized_num_steps)
+            continue
+        if note_num in PITCHES_MAP:
+            midi_array[position, PITCHES_MAP[note_num]] = velocity
     
     return midi_array
     
@@ -233,11 +265,18 @@ def array_to_midi(array,
 
 
 def nearest_pow2(x):
-    '''Normalize input to nearest power of 2. Round down when halfway
-    between two powers of two.'''
+    '''Normalize input to nearest power of 2, or midpoints between
+    consecutive powers of two. Round down when halfway between two
+    possibilities.'''
 
     low = 2**int(floor(log(x, 2)))
     high = 2**int(ceil(log(x, 2)))
+    mid = (low + high) / 2
+
+    if x < mid:
+        high = mid
+    else:
+        low = mid
     if high - x < x - low:
         nearest = high
     else:
