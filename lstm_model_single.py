@@ -16,35 +16,48 @@ from midi_util import array_to_midi, print_array
 
 np.random.seed(10)
 
-# The pitches we are paying attention to in the dataxs
-PITCHES = [36,38,41,42,47,58,59,61]
-# The pitches we want to generate (potentially different drum kit)
-OUT_PITCHES = [54,56,58,60,61,62,63,64]
-NUM_HIDDEN_UNITS = 128
-PHRASE_LEN = 512
-NUM_ITERATIONS = 60
-BATCH_SIZE = 64
+# All the pitches represented in the MIDI data arrays.
+# TODO: Read pitches from pitches.txt file in corresponding midi array
+# directory.
+PITCHES = [36, 37, 38, 40, 41, 42, 44, 45, 46, 47, 49, 50, 58, 59, 60, 61, 62, 63, 64, 66]
+# The subset of pitches we'll actually use.
+IN_PITCHES = [36, 38, 41, 42, 47, 58, 59, 61]
+# The pitches we want to generate (potentially for different drum kit)
+OUT_PITCHES = [54, 56, 58, 60, 61, 62, 63, 64]
+# The minimum number of hits to keep a drum loop after the types of
+# hits have been filtered by IN_PITCHES.
 MIN_HITS = 8
 
-MIDI_IN_DIR = '/home/ubuntu/neural-beats/midi_arrays/'
+########################################################################
+# Network architecture parameters.
+########################################################################
+NUM_HIDDEN_UNITS = 128
+# The length of the phrase from which the predict the next symbol.
+PHRASE_LEN = 512
+# Dimensionality of the symbol space.
+SYMBOL_DIM = 2**len(IN_PITCHES)
+NUM_ITERATIONS = 60
+BATCH_SIZE = 64
+
+MIDI_IN_DIR = '/home/ubuntu/neural-beats/midi_arrays/mega'
 #MIDI_IN_DIR = '/Users/snikolov/Downloads/groove-monkee-midi-gm/array'
 MIDI_OUT_DIR = '/home/ubuntu/neural-beats/midi-out'
 MODEL_OUT_DIR = '/home/ubuntu/neural-beats/models'
-MODEL_NAME = 'model'
+MODEL_NAME = 'model_20160517'
 LOAD_WEIGHTS = False
 
 
 # Encode each configuration of p pitches, each on or off, as a
 # number between 0 and 2**p-1.
-assert len(PITCHES) <= 8, 'Too many configurations for this many pitches!'
+assert len(IN_PITCHES) <= 8, 'Too many configurations for this many pitches!'
 encodings = {
     config : i
-    for i, config in enumerate(itertools.product([0,1], repeat=len(PITCHES)))
+    for i, config in enumerate(itertools.product([0,1], repeat=len(IN_PITCHES)))
 }
 
 decodings = {
     i : config
-    for i, config in enumerate(itertools.product([0,1], repeat=len(PITCHES)))
+    for i, config in enumerate(itertools.product([0,1], repeat=len(IN_PITCHES)))
 }
 
 
@@ -89,20 +102,24 @@ def prepare_data():
     # Sequence of configuration numbers representing combinations of
     # active pitches.
     config_seq = []
-    for root, dirs, files in os.walk(MIDI_IN_DIR):
+    num_dirs = len([x for x in os.walk(MIDI_IN_DIR)])
+
+    in_pitch_indices = [ PITCHES.index(p) for p in IN_PITCHES ]
+    for dir_idx, (root, dirs, files) in enumerate(os.walk(MIDI_IN_DIR)):
         for filename in files:
             if filename.split('.')[-1] != 'npy':
                 continue
             array = np.load(os.path.join(root, filename))
-            if np.sum(np.sum(array[:, PITCHES]>0)) < MIN_HITS:
+            if np.sum(np.sum(array[:, in_pitch_indices]>0)) < MIN_HITS:
                 continue
-            config_seq.extend(encode(array[:,PITCHES]))
+            config_seq.extend(encode(array[:, in_pitch_indices]))
+        print 'Loaded {}/{} directories'.format(dir_idx, num_dirs)
     config_seq = np.array(config_seq)
 
     # Construct labeled examples.
     num_examples = len(config_seq) - PHRASE_LEN
-    X = np.zeros((num_examples, PHRASE_LEN, 2**len(PITCHES)), dtype=np.bool)
-    y = np.zeros((num_examples, 2**len(PITCHES)), dtype=np.bool) 
+    X = np.zeros((num_examples, PHRASE_LEN, SYMBOL_DIM), dtype=np.bool)
+    y = np.zeros((num_examples, SYMBOL_DIM), dtype=np.bool) 
     for i in xrange(num_examples):
         for j, cid in enumerate(config_seq[i:i+PHRASE_LEN]):
             X[i, j, cid] = 1
@@ -125,7 +142,7 @@ def generate(model, seed, mid_name, temperature=1.0, length=512):
     #print('-----')
 
     for j in range(length):
-        x = np.zeros((1, PHRASE_LEN, 2**len(PITCHES)))
+        x = np.zeros((1, PHRASE_LEN, SYMBOL_DIM))
         for t, config_id in enumerate(phrase):
             x[0, t, config_id] = 1
         preds = model.predict(x, verbose=0)[0]
@@ -146,11 +163,11 @@ def init_model():
     model.add(LSTM(
         NUM_HIDDEN_UNITS,
         return_sequences=True,
-        input_shape=(PHRASE_LEN, 2**len(PITCHES))))
+        input_shape=(PHRASE_LEN, SYMBOL_DIM)))
     model.add(Dropout(0.2))
     model.add(LSTM(NUM_HIDDEN_UNITS, return_sequences=False))
     model.add(Dropout(0.2))
-    model.add(Dense(2**len(PITCHES)))
+    model.add(Dense(SYMBOL_DIM))
     model.add(Activation('softmax'))
     model.compile(loss='categorical_crossentropy', optimizer='rmsprop')
     return model
@@ -187,7 +204,7 @@ def train(config_seq, X, y):
             #print('-----')
 
             for j in range(512):
-                x = np.zeros((1, PHRASE_LEN, 2**len(PITCHES)))
+                x = np.zeros((1, PHRASE_LEN, SYMBOL_DIM))
                 for t, config_id in enumerate(phrase):
                     x[0, t, config_id] = 1
                 preds = model.predict(x, verbose=0)[0]
@@ -206,7 +223,9 @@ def train(config_seq, X, y):
 
 def run():
     config_seq, X, y = prepare_data()
-    #train(config_seq, X, y)
+    train(config_seq, X, y)
+
+    '''
     model = init_model()
     model.load_weights(os.path.join(MODEL_OUT_DIR, MODEL_NAME))
     seed = np.zeros((32, 4))
@@ -238,5 +257,5 @@ def run():
                      'out_electro_{}_{}_{}.mid'.format(length, temperature, i),
                      temperature=1.1,
                      length=length)
-
+    '''
 run()
