@@ -39,10 +39,13 @@ SYMBOL_DIM = 2**len(IN_PITCHES)
 NUM_ITERATIONS = 60
 BATCH_SIZE = 64
 
-MIDI_IN_DIR = '/home/ubuntu/neural-beats/midi_arrays/mega'
+BASE_DIR = '/Users/snikolov/Dropbox/projects/neural-beats'
+#BASE_DIR = '/home/ubuntu/neural-beats'
+#MIDI_IN_DIR = BASE_DIR + '/' + 'midi_arrays/mega'
+MIDI_IN_DIR = BASE_DIR + '/' + 'mega-pack/array/Rock Essentials 2 Live 9 SD/Preview Files/Fills/4-4 Fills'
 #MIDI_IN_DIR = '/Users/snikolov/Downloads/groove-monkee-midi-gm/array'
-MIDI_OUT_DIR = '/home/ubuntu/neural-beats/midi-out'
-MODEL_OUT_DIR = '/home/ubuntu/neural-beats/models'
+MIDI_OUT_DIR = BASE_DIR + '/' + 'midi-out'
+MODEL_OUT_DIR = BASE_DIR + '/' + 'models'
 MODEL_NAME = 'model_20160517'
 LOAD_WEIGHTS = False
 
@@ -59,6 +62,38 @@ decodings = {
     i : config
     for i, config in enumerate(itertools.product([0,1], repeat=len(IN_PITCHES)))
 }
+
+class SequenceDataGenerator:
+    def __init__(self, sequence, phrase_length=64, batch_size=512):
+        '''Initialize a SequenceDataGenerator.
+
+        Arguments:
+
+        sequence - The symbolic, integer sequence to generate from
+        phrase_length - The length of phrases to be generated
+        batch_size - The number of phrases to be generated.
+        '''
+
+        self.sequence = sequence
+        self.phrase_length = phrase_length
+        self.batch_size = batch_size
+
+
+    def gen(self):
+        while True:
+            X_batch = np.zeros((self.batch_size, self.phrase_length, SYMBOL_DIM))
+            y_batch = np.zeros((self.batch_size, SYMBOL_DIM))
+
+            for batch_idx in xrange(self.batch_size):
+                phrase_start_idx = np.random.randint(
+                    0, len(self.sequence) - self.phrase_length)
+                X_batch[batch_idx,
+                        range(self.phrase_length),
+                        self.sequence[phrase_start_idx: phrase_start_idx + self.phrase_length]] = 1
+                y_batch[batch_idx,
+                        self.sequence[phrase_start_idx + self.phrase_length]] = 1
+
+            yield (X_batch, y_batch)
 
 
 def sample(a, temperature=1.0):
@@ -113,11 +148,18 @@ def prepare_data():
             if np.sum(np.sum(array[:, in_pitch_indices]>0)) < MIN_HITS:
                 continue
             config_seq.extend(encode(array[:, in_pitch_indices]))
-        print 'Loaded {}/{} directories'.format(dir_idx, num_dirs)
+        print 'Loaded {}/{} directories'.format(dir_idx + 1, num_dirs)
     config_seq = np.array(config_seq)
 
     # Construct labeled examples.
     num_examples = len(config_seq) - PHRASE_LEN
+
+    # Use a generator for X and y as the whole dataset may not fit in
+    # memory.
+    data_generator = SequenceDataGenerator(config_seq,
+                                           phrase_length=PHRASE_LEN,
+                                           batch_size=BATCH_SIZE)
+    '''
     X = np.zeros((num_examples, PHRASE_LEN, SYMBOL_DIM), dtype=np.bool)
     y = np.zeros((num_examples, SYMBOL_DIM), dtype=np.bool) 
     for i in xrange(num_examples):
@@ -126,8 +168,8 @@ def prepare_data():
         y[i, config_seq[i+PHRASE_LEN]] = 1
     X = 1 * X
     y = 1 * y
-
-    return config_seq, X, y
+    '''
+    return config_seq, data_generator
 
 
 def generate(model, seed, mid_name, temperature=1.0, length=512):
@@ -173,7 +215,7 @@ def init_model():
     return model
 
 
-def train(config_seq, X, y):
+def train(config_seq, data_generator):
     '''Train model and save weights.'''
 
     model = init_model()
@@ -189,7 +231,9 @@ def train(config_seq, X, y):
         model.load_weights(os.path.join(MODEL_OUT_DIR, MODEL_NAME))
 
     for i in range(NUM_ITERATIONS):
-        model.fit(X, y, batch_size=BATCH_SIZE, nb_epoch=1)
+        model.fit_generator(data_generator.gen(),
+                            samples_per_epoch=len(config_seq),
+                            nb_epoch=1)
         start_index = np.random.randint(0, len(config_seq) - PHRASE_LEN - 1)
         for temperature in [0.2, 0.5, 1.0, 1.2]:
             #print()
@@ -222,8 +266,8 @@ def train(config_seq, X, y):
 
 
 def run():
-    config_seq, X, y = prepare_data()
-    train(config_seq, X, y)
+    config_seq, data_generator = prepare_data()
+    train(config_seq, data_generator)
 
     '''
     model = init_model()
