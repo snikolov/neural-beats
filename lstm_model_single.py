@@ -36,13 +36,15 @@ NUM_HIDDEN_UNITS = 128
 PHRASE_LEN = 512
 # Dimensionality of the symbol space.
 SYMBOL_DIM = 2**len(IN_PITCHES)
-NUM_ITERATIONS = 60
+NUM_ITERATIONS = 240
 BATCH_SIZE = 64
 
-BASE_DIR = '/Users/snikolov/Dropbox/projects/neural-beats'
-#BASE_DIR = '/home/ubuntu/neural-beats'
-#MIDI_IN_DIR = BASE_DIR + '/' + 'midi_arrays/mega'
-MIDI_IN_DIR = BASE_DIR + '/' + 'mega-pack/array/Rock Essentials 2 Live 9 SD/Preview Files/Fills/4-4 Fills'
+VALIDATION_PERCENT=0.5
+
+#BASE_DIR = '/Users/snikolov/Dropbox/projects/neural-beats'
+BASE_DIR = '/home/ubuntu/neural-beats'
+MIDI_IN_DIR = BASE_DIR + '/' + 'midi_arrays/mega/Rock Essentials 2 Live 9 SD/Preview Files/Fills/4-4 Fills'
+#MIDI_IN_DIR = BASE_DIR + '/' + 'mega-pack/array/Rock Essentials 2 Live 9 SD/Preview Files/Fills/4-4 Fills'
 #MIDI_IN_DIR = '/Users/snikolov/Downloads/groove-monkee-midi-gm/array'
 MIDI_OUT_DIR = BASE_DIR + '/' + 'midi-out'
 MODEL_OUT_DIR = BASE_DIR + '/' + 'models'
@@ -64,7 +66,12 @@ decodings = {
 }
 
 class SequenceDataGenerator:
-    def __init__(self, sequence, phrase_length=64, batch_size=512):
+    def __init__(self,
+                 sequence,
+                 phrase_length=64,
+                 batch_size=512,
+                 validation_percent = 0.01,
+                 is_validation=False):
         '''Initialize a SequenceDataGenerator.
 
         Arguments:
@@ -78,15 +85,36 @@ class SequenceDataGenerator:
         self.phrase_length = phrase_length
         self.batch_size = batch_size
 
+        # Reset the random seed, so that a call to the constructor
+        # with is_validation=True followed by a call with
+        # is_validation=False produces two complementary sets of
+        # indices.
+        np.random.seed(0)
+
+        num_start_indices = len(sequence) - phrase_length
+        if is_validation:
+            self.allowed_indices = np.arange(num_start_indices)[
+                np.random.random(num_start_indices) < validation_percent]
+        else:
+            self.allowed_indices = np.arange(num_start_indices)[
+                np.random.random(num_start_indices) >= validation_percent]
+
+        assert len(self.allowed_indices) > 0, 'No data selected for {}'.format(is_validation)
+
 
     def gen(self):
+        '''Lazily generate an infinite stream of data batches.
+
+        Each batch is a tuple with two entries: BATCH_SIZE Xs and
+        BATCH_SIZE ys.
+        '''
+
         while True:
             X_batch = np.zeros((self.batch_size, self.phrase_length, SYMBOL_DIM))
             y_batch = np.zeros((self.batch_size, SYMBOL_DIM))
 
             for batch_idx in xrange(self.batch_size):
-                phrase_start_idx = np.random.randint(
-                    0, len(self.sequence) - self.phrase_length)
+                phrase_start_idx = np.random.choice(self.allowed_indices)
                 X_batch[batch_idx,
                         range(self.phrase_length),
                         self.sequence[phrase_start_idx: phrase_start_idx + self.phrase_length]] = 1
@@ -138,6 +166,7 @@ def prepare_data():
     # active pitches.
     config_seq = []
     num_dirs = len([x for x in os.walk(MIDI_IN_DIR)])
+    assert num_dirs > 0, 'No data found at {}'.format(MIDI_IN_DIR)
 
     in_pitch_indices = [ PITCHES.index(p) for p in IN_PITCHES ]
     for dir_idx, (root, dirs, files) in enumerate(os.walk(MIDI_IN_DIR)):
@@ -156,12 +185,20 @@ def prepare_data():
 
     # Use a generator for X and y as the whole dataset may not fit in
     # memory.
-    data_generator = SequenceDataGenerator(config_seq,
-                                           phrase_length=PHRASE_LEN,
-                                           batch_size=BATCH_SIZE)
+    train_generator = SequenceDataGenerator(config_seq,
+                                            phrase_length=PHRASE_LEN,
+                                            batch_size=BATCH_SIZE,
+                                            is_validation=False,
+                                            validation_percent=VALIDATION_PERCENT)
+
+    valid_generator = SequenceDataGenerator(config_seq,
+                                            phrase_length=PHRASE_LEN,
+                                            batch_size=BATCH_SIZE,
+                                            is_validation=True,
+                                        validation_percent=VALIDATION_PERCENT)
     '''
     X = np.zeros((num_examples, PHRASE_LEN, SYMBOL_DIM), dtype=np.bool)
-    y = np.zeros((num_examples, SYMBOL_DIM), dtype=np.bool) 
+    y = np.zeros((num_examples, SYMBOL_DIM), dtype=np.bool)
     for i in xrange(num_examples):
         for j, cid in enumerate(config_seq[i:i+PHRASE_LEN]):
             X[i, j, cid] = 1
@@ -169,7 +206,7 @@ def prepare_data():
     X = 1 * X
     y = 1 * y
     '''
-    return config_seq, data_generator
+    return config_seq, train_generator, valid_generator
 
 
 def generate(model, seed, mid_name, temperature=1.0, length=512):
@@ -215,7 +252,7 @@ def init_model():
     return model
 
 
-def train(config_seq, data_generator):
+def train(config_seq, train_generator, valid_generator):
     '''Train model and save weights.'''
 
     model = init_model()
@@ -230,10 +267,22 @@ def train(config_seq, data_generator):
         print('Loading previous weights...')
         model.load_weights(os.path.join(MODEL_OUT_DIR, MODEL_NAME))
 
+    best_val_loss = None
+
     for i in range(NUM_ITERATIONS):
-        model.fit_generator(data_generator.gen(),
-                            samples_per_epoch=len(config_seq),
-                            nb_epoch=1)
+        history = model.fit_generator(
+            train_generator.gen(),
+            samples_per_epoch=len(config_seq),
+            nb_epoch=1,
+            validation_data=valid_generator.gen(),
+            nb_val_samples=len(config_seq)*VALIDATION_PERCENT)
+
+        val_loss = history.history['val_loss'][-1]
+        if best_val_loss is None or val_loss < best_val_loss:
+            print 'Best validation loss so far. Saving...'
+            model.save_weights(os.path.join(MODEL_OUT_DIR, MODEL_NAME),
+                               overwrite=True)
+
         start_index = np.random.randint(0, len(config_seq) - PHRASE_LEN - 1)
         for temperature in [0.2, 0.5, 1.0, 1.2]:
             #print()
@@ -244,7 +293,7 @@ def train(config_seq, data_generator):
 
             #print('----- Generating with seed:')
             phrase_array = decode(phrase)
-            print_array(phrase_array)
+            #print_array(phrase_array)
             #print('-----')
 
             for j in range(512):
@@ -261,13 +310,12 @@ def train(config_seq, data_generator):
             mid_name = 'out_{}_{}.mid'.format(i,temperature)
             mid = array_to_midi(unfold(decode(generated), OUT_PITCHES), mid_name)
             mid.save(os.path.join(MIDI_OUT_DIR, mid_name))
-        model.save_weights(os.path.join(MODEL_OUT_DIR, MODEL_NAME), overwrite=True)
     return model
 
 
 def run():
-    config_seq, data_generator = prepare_data()
-    train(config_seq, data_generator)
+    config_seq, train_generator, valid_generator = prepare_data()
+    train(config_seq, train_generator, valid_generator)
 
     '''
     model = init_model()
