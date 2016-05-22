@@ -268,7 +268,7 @@ def train(config_seq, train_generator, valid_generator):
         print('Loading previous weights...')
         model.load_weights(os.path.join(MODEL_OUT_DIR, MODEL_NAME, MODEL_NAME))
 
-    best_val_loss = 1.0041#None
+    best_val_loss = None
 
     nb_val_samples = len(config_seq) * VALIDATION_PERCENT
     print('Length of sequence: {}'.format(len(config_seq)))
@@ -291,7 +291,7 @@ def train(config_seq, train_generator, valid_generator):
             model.save_weights(os.path.join(MODEL_OUT_DIR, MODEL_NAME, MODEL_NAME),
                                overwrite=True)
         # Write history.
-        with open('history.json', 'a') as fp:
+        with open(os.path.join(MODEL_OUT_DIR, MODEL_NAME, 'history.jsonl'), 'a') as fp:
             json.dump(history.history, fp)
             fp.write('\n')
 
