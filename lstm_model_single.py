@@ -3,12 +3,14 @@ number from 0 to 2**p-1 that represents a configuration of p pitches
 that may be on or off.'''
 
 import itertools
+import json
 import os
 
-from keras.models import Sequential
+from keras import backend as K
 from keras.layers.core import Dense, Activation, Dropout
 from keras.layers.recurrent import LSTM
-from keras import backend as K
+from keras.models import Sequential
+from keras.optimizers import RMSprop
 import numpy as np
 
 from midi_util import array_to_midi, print_array
@@ -23,7 +25,7 @@ PITCHES = [36, 37, 38, 40, 41, 42, 44, 45, 46, 47, 49, 50, 58, 59, 60, 61, 62, 6
 # The subset of pitches we'll actually use.
 IN_PITCHES = [36, 38, 41, 42, 47, 58, 59, 61]
 # The pitches we want to generate (potentially for different drum kit)
-OUT_PITCHES = [54, 56, 58, 60, 61, 62, 63, 64]
+OUT_PITCHES = IN_PITCHES#[54, 56, 58, 60, 61, 62, 63, 64]
 # The minimum number of hits to keep a drum loop after the types of
 # hits have been filtered by IN_PITCHES.
 MIN_HITS = 8
@@ -31,25 +33,26 @@ MIN_HITS = 8
 ########################################################################
 # Network architecture parameters.
 ########################################################################
-NUM_HIDDEN_UNITS = 128
+NUM_HIDDEN_UNITS = 512
 # The length of the phrase from which the predict the next symbol.
 PHRASE_LEN = 512
 # Dimensionality of the symbol space.
-SYMBOL_DIM = 2**len(IN_PITCHES)
+SYMBOL_DIM = 2 ** len(IN_PITCHES)
 NUM_ITERATIONS = 240
 BATCH_SIZE = 64
 
-VALIDATION_PERCENT=0.5
+VALIDATION_PERCENT = 0.001
 
 #BASE_DIR = '/Users/snikolov/Dropbox/projects/neural-beats'
 BASE_DIR = '/home/ubuntu/neural-beats'
-MIDI_IN_DIR = BASE_DIR + '/' + 'midi_arrays/mega/Rock Essentials 2 Live 9 SD/Preview Files/Fills/4-4 Fills'
+MIDI_IN_DIR = os.path.join(BASE_DIR, 'midi_arrays/mega/')
+#MIDI_IN_DIR = os.path.join(BASE_DIR, 'midi_arrays/mega/Rock Essentials 2 Live 9 SD/Preview Files/Fills/4-4 Fills')
 #MIDI_IN_DIR = BASE_DIR + '/' + 'mega-pack/array/Rock Essentials 2 Live 9 SD/Preview Files/Fills/4-4 Fills'
 #MIDI_IN_DIR = '/Users/snikolov/Downloads/groove-monkee-midi-gm/array'
-MIDI_OUT_DIR = BASE_DIR + '/' + 'midi-out'
-MODEL_OUT_DIR = BASE_DIR + '/' + 'models'
-MODEL_NAME = 'model_20160517'
-LOAD_WEIGHTS = False
+MODEL_OUT_DIR = os.path.join(BASE_DIR, 'models')
+MODEL_NAME = 'model-20160522'
+MIDI_OUT_DIR = os.path.join(MODEL_OUT_DIR, MODEL_NAME, 'gen-midi')
+LOAD_WEIGHTS = True
 
 
 # Encode each configuration of p pitches, each on or off, as a
@@ -70,7 +73,7 @@ class SequenceDataGenerator:
                  sequence,
                  phrase_length=64,
                  batch_size=512,
-                 validation_percent = 0.01,
+                 validation_percent=0.01,
                  is_validation=False):
         '''Initialize a SequenceDataGenerator.
 
@@ -214,11 +217,7 @@ def generate(model, seed, mid_name, temperature=1.0, length=512):
 
     generated = []
     phrase = seed
-
-    #print('----- Generating with seed:')
     phrase_array = decode(phrase)
-    print_array(phrase_array)
-    #print('-----')
 
     for j in range(length):
         x = np.zeros((1, PHRASE_LEN, SYMBOL_DIM))
@@ -229,8 +228,7 @@ def generate(model, seed, mid_name, temperature=1.0, length=512):
 
         generated += [next_id]
         phrase = phrase[1:] + [next_id]
-        #print_array(decode([next_id]))
-    #print()
+
     mid = array_to_midi(unfold(decode(generated), OUT_PITCHES), mid_name)
     mid.save(os.path.join(MIDI_OUT_DIR, mid_name))
     return mid
@@ -248,7 +246,10 @@ def init_model():
     model.add(Dropout(0.2))
     model.add(Dense(SYMBOL_DIM))
     model.add(Activation('softmax'))
-    model.compile(loss='categorical_crossentropy', optimizer='rmsprop')
+    model.compile(
+        loss='categorical_crossentropy',
+        optimizer=RMSprop(lr=0.001, rho=0.9, epsilon=1e-08))
+        #optimizer='rmsprop')
     return model
 
 
@@ -265,51 +266,53 @@ def train(config_seq, train_generator, valid_generator):
 
     if LOAD_WEIGHTS:
         print('Loading previous weights...')
-        model.load_weights(os.path.join(MODEL_OUT_DIR, MODEL_NAME))
+        model.load_weights(os.path.join(MODEL_OUT_DIR, MODEL_NAME, MODEL_NAME))
 
-    best_val_loss = None
+    best_val_loss = 1.0041#None
+
+    nb_val_samples = len(config_seq) * VALIDATION_PERCENT
+    print('Length of sequence: {}'.format(len(config_seq)))
+    print('Using {} validation batches'.format(nb_val_samples))
 
     for i in range(NUM_ITERATIONS):
+        print('Iteration {}'.format(i))
+
         history = model.fit_generator(
             train_generator.gen(),
-            samples_per_epoch=len(config_seq),
+            samples_per_epoch=BATCH_SIZE*512,#len(config_seq),
             nb_epoch=1,
             validation_data=valid_generator.gen(),
-            nb_val_samples=len(config_seq)*VALIDATION_PERCENT)
+            nb_val_samples=nb_val_samples)
 
         val_loss = history.history['val_loss'][-1]
         if best_val_loss is None or val_loss < best_val_loss:
             print 'Best validation loss so far. Saving...'
-            model.save_weights(os.path.join(MODEL_OUT_DIR, MODEL_NAME),
+            best_val_loss = val_loss
+            model.save_weights(os.path.join(MODEL_OUT_DIR, MODEL_NAME, MODEL_NAME),
                                overwrite=True)
+        # Write history.
+        with open('history.json', 'a') as fp:
+            json.dump(history.history, fp)
+            fp.write('\n')
 
         start_index = np.random.randint(0, len(config_seq) - PHRASE_LEN - 1)
-        for temperature in [0.2, 0.5, 1.0, 1.2]:
-            #print()
-            #print('----- temperature:', temperature)
+        gen_length = 512
 
+        # Generate samples.
+        if i < 5:#if not (i > 0 and i % 10 == 0):
+            continue
+
+        for temperature in [0.2, 0.5, 1.0, 1.2]:
             generated = []
             phrase = list(config_seq[start_index: start_index + PHRASE_LEN])
 
-            #print('----- Generating with seed:')
+            print('----- Generating with temperature:', temperature)
             phrase_array = decode(phrase)
-            #print_array(phrase_array)
-            #print('-----')
-
-            for j in range(512):
-                x = np.zeros((1, PHRASE_LEN, SYMBOL_DIM))
-                for t, config_id in enumerate(phrase):
-                    x[0, t, config_id] = 1
-                preds = model.predict(x, verbose=0)[0]
-                next_id = sample(preds, temperature)
-
-                generated += [next_id]
-                phrase = phrase[1:] + [next_id]
-                #print_array(decode([next_id]))
-            #print()
-            mid_name = 'out_{}_{}.mid'.format(i,temperature)
-            mid = array_to_midi(unfold(decode(generated), OUT_PITCHES), mid_name)
-            mid.save(os.path.join(MIDI_OUT_DIR, mid_name))
+            generate(model,
+                     phrase,
+                     'out_{}_{}_{}.mid'.format(gen_length, temperature, i),
+                     temperature=temperature,
+                     length=gen_length)
     return model
 
 
