@@ -35,13 +35,13 @@ MIN_HITS = 8
 ########################################################################
 NUM_HIDDEN_UNITS = 512
 # The length of the phrase from which the predict the next symbol.
-PHRASE_LEN = 512
+PHRASE_LEN = 32
 # Dimensionality of the symbol space.
 SYMBOL_DIM = 2 ** len(IN_PITCHES)
-NUM_ITERATIONS = 240
+NUM_ITERATIONS = 600
 BATCH_SIZE = 64
 
-VALIDATION_PERCENT = 0.001
+VALIDATION_PERCENT = 0.01
 
 #BASE_DIR = '/Users/snikolov/Dropbox/projects/neural-beats'
 BASE_DIR = '/home/ubuntu/neural-beats'
@@ -50,7 +50,7 @@ MIDI_IN_DIR = os.path.join(BASE_DIR, 'midi_arrays/mega/')
 #MIDI_IN_DIR = BASE_DIR + '/' + 'mega-pack/array/Rock Essentials 2 Live 9 SD/Preview Files/Fills/4-4 Fills'
 #MIDI_IN_DIR = '/Users/snikolov/Downloads/groove-monkee-midi-gm/array'
 MODEL_OUT_DIR = os.path.join(BASE_DIR, 'models')
-MODEL_NAME = 'model-20160522'
+MODEL_NAME = 'model-20160524'
 MIDI_OUT_DIR = os.path.join(MODEL_OUT_DIR, MODEL_NAME, 'gen-midi')
 LOAD_WEIGHTS = True
 
@@ -242,14 +242,18 @@ def init_model():
         return_sequences=True,
         input_shape=(PHRASE_LEN, SYMBOL_DIM)))
     model.add(Dropout(0.2))
+    model.add(LSTM(
+        NUM_HIDDEN_UNITS,
+        return_sequences=True,
+        input_shape=(SYMBOL_DIM, SYMBOL_DIM)))
+    model.add(Dropout(0.2))
     model.add(LSTM(NUM_HIDDEN_UNITS, return_sequences=False))
     model.add(Dropout(0.2))
     model.add(Dense(SYMBOL_DIM))
     model.add(Activation('softmax'))
     model.compile(
         loss='categorical_crossentropy',
-        optimizer=RMSprop(lr=0.001, rho=0.9, epsilon=1e-08))
-        #optimizer='rmsprop')
+        optimizer=RMSprop(lr=1e-03, rho=0.9, epsilon=1e-08))
     return model
 
 
@@ -257,6 +261,8 @@ def train(config_seq, train_generator, valid_generator):
     '''Train model and save weights.'''
 
     model = init_model()
+    print model.summary()
+
     # Train the model
     if not os.path.exists(MIDI_OUT_DIR):
         os.makedirs(MIDI_OUT_DIR)
@@ -265,8 +271,10 @@ def train(config_seq, train_generator, valid_generator):
     print('Training the model...')
 
     if LOAD_WEIGHTS:
-        print('Loading previous weights...')
-        model.load_weights(os.path.join(MODEL_OUT_DIR, MODEL_NAME, MODEL_NAME))
+        print('Attempting to load previous weights...')
+        weights_path = os.path.join(MODEL_OUT_DIR, MODEL_NAME, MODEL_NAME)
+        if os.path.exists(weights_path):
+            model.load_weights(weights_path)
 
     best_val_loss = None
 
@@ -279,7 +287,7 @@ def train(config_seq, train_generator, valid_generator):
 
         history = model.fit_generator(
             train_generator.gen(),
-            samples_per_epoch=BATCH_SIZE*512,#len(config_seq),
+            samples_per_epoch=BATCH_SIZE*512,
             nb_epoch=1,
             validation_data=valid_generator.gen(),
             nb_val_samples=nb_val_samples)
@@ -299,15 +307,18 @@ def train(config_seq, train_generator, valid_generator):
         gen_length = 512
 
         # Generate samples.
-        if i < 5:#if not (i > 0 and i % 10 == 0):
+        if not (i > 9 and i % 10 == 0):
             continue
 
-        for temperature in [0.2, 0.5, 1.0, 1.2]:
+        for temperature in [0.5, 0.75, 1.0]:
+            # Reset seed so we can compare generated patterns across iterations.
+            np.random.seed(0)
             generated = []
             phrase = list(config_seq[start_index: start_index + PHRASE_LEN])
 
             print('----- Generating with temperature:', temperature)
             phrase_array = decode(phrase)
+
             generate(model,
                      phrase,
                      'out_{}_{}_{}.mid'.format(gen_length, temperature, i),
