@@ -23,7 +23,7 @@ np.random.seed(10)
 # directory.
 PITCHES = [36, 37, 38, 40, 41, 42, 44, 45, 46, 47, 49, 50, 58, 59, 60, 61, 62, 63, 64, 66]
 # The subset of pitches we'll actually use.
-IN_PITCHES = [36, 38, 41, 42, 47, 58, 59, 61]
+IN_PITCHES = [36, 38, 42, 58, 59, 61]#[36, 38, 41, 42, 47, 58, 59, 61]
 # The pitches we want to generate (potentially for different drum kit)
 OUT_PITCHES = IN_PITCHES#[54, 56, 58, 60, 61, 62, 63, 64]
 # The minimum number of hits to keep a drum loop after the types of
@@ -33,7 +33,7 @@ MIN_HITS = 8
 ########################################################################
 # Network architecture parameters.
 ########################################################################
-NUM_HIDDEN_UNITS = 512
+NUM_HIDDEN_UNITS = 700
 # The length of the phrase from which the predict the next symbol.
 PHRASE_LEN = 32
 # Dimensionality of the symbol space.
@@ -50,7 +50,7 @@ MIDI_IN_DIR = os.path.join(BASE_DIR, 'midi_arrays/mega/')
 #MIDI_IN_DIR = BASE_DIR + '/' + 'mega-pack/array/Rock Essentials 2 Live 9 SD/Preview Files/Fills/4-4 Fills'
 #MIDI_IN_DIR = '/Users/snikolov/Downloads/groove-monkee-midi-gm/array'
 MODEL_OUT_DIR = os.path.join(BASE_DIR, 'models')
-MODEL_NAME = 'model-20160524'
+MODEL_NAME = 'model-2016052-2'
 MIDI_OUT_DIR = os.path.join(MODEL_OUT_DIR, MODEL_NAME, 'gen-midi')
 LOAD_WEIGHTS = True
 
@@ -241,14 +241,16 @@ def init_model():
         NUM_HIDDEN_UNITS,
         return_sequences=True,
         input_shape=(PHRASE_LEN, SYMBOL_DIM)))
-    model.add(Dropout(0.2))
+    model.add(Dropout(0.3))
+    '''
     model.add(LSTM(
         NUM_HIDDEN_UNITS,
         return_sequences=True,
         input_shape=(SYMBOL_DIM, SYMBOL_DIM)))
     model.add(Dropout(0.2))
+    '''
     model.add(LSTM(NUM_HIDDEN_UNITS, return_sequences=False))
-    model.add(Dropout(0.2))
+    model.add(Dropout(0.3))
     model.add(Dense(SYMBOL_DIM))
     model.add(Activation('softmax'))
     model.compile(
