@@ -2,6 +2,7 @@
 number from 0 to 2**p-1 that represents a configuration of p pitches
 that may be on or off.'''
 
+from datetime import datetime
 import itertools
 import json
 import os
@@ -219,12 +220,18 @@ def generate(model, seed, mid_name, temperature=1.0, length=512):
     phrase = seed
     phrase_array = decode(phrase)
 
+    if type(temperature) == int:
+        temperature = (temperature for _ in xrange(length))
+
+    assert len(temperature) == length, 'Temperature schedule is of incorrect length ({})'.format(len(temperature))
+
     for j in range(length):
+        print datetime.strftime(datetime.now(), '%Y-%m-%dT%H:%M:%S')
         x = np.zeros((1, PHRASE_LEN, SYMBOL_DIM))
         for t, config_id in enumerate(phrase):
             x[0, t, config_id] = 1
         preds = model.predict(x, verbose=0)[0]
-        next_id = sample(preds, temperature)
+        next_id = sample(preds, temperature[j])
 
         generated += [next_id]
         phrase = phrase[1:] + [next_id]
@@ -330,34 +337,52 @@ def train(config_seq, train_generator, valid_generator):
 
 
 def run():
-    config_seq, train_generator, valid_generator = prepare_data()
-    train(config_seq, train_generator, valid_generator)
+    #config_seq, train_generator, valid_generator = prepare_data()
+    #train(config_seq, train_generator, valid_generator)
 
-    '''
+    print 'Loading model...'
     model = init_model()
-    model.load_weights(os.path.join(MODEL_OUT_DIR, MODEL_NAME))
-    seed = np.zeros((32, 4))
+    model.load_weights(os.path.join(MODEL_OUT_DIR, MODEL_NAME, MODEL_NAME))
+    seed = np.zeros((32, 6))
 
-    """
     # Normal techno pattern
     seed[0,0] = 1 # Kick
     seed[4,2] = 1 # hat
+    seed[6,2] = 1 # hat
     seed[8,0] = 1 # Kick
     seed[12,2] = 1 # hat
     seed[16,0] = 1 # Kick
     seed[20,2] = 1 # hat
+    seed[22,2] = 1 # hat
     seed[24,0] = 1 # Kick
     seed[28,2] = 1 # hat
-    """
 
+    """
     # Broken beat / electro pattern
     seed[0,0] = 1 # Kick
     seed[8,1] = 1 # Snare
     seed[12,0] = 1 # Kick
     seed[24,1] = 1 # Snare
     seed[30,1] = 1 # Snare
+    """
 
-    length = 4096
+    print 'Generating...'
+    length = 32 * 16
+    base_temperature = 0.7
+    high_temperature = 2
+    temperature = np.array([base_temperature] * length)
+    temperature[::16] = high_temperature
+    #temperature[1::16] = high_temperature
+    #temperature[2::16] = high_temperature
+    #temperature[3::16] = high_temperature
+    for i in xrange(4):
+        print 'pattern', i
+        generate(model,
+                 encode(seed),
+                 'out_tempsched_techno2_{}_{}_{}.mid'.format(base_temperature, high_temperature, i),
+                 temperature=temperature,
+                 length=length)
+    """
     for temperature in [0.7,0.9,1.1]:
         for i in xrange(5):
             generate(model,
@@ -365,5 +390,6 @@ def run():
                      'out_electro_{}_{}_{}.mid'.format(length, temperature, i),
                      temperature=1.1,
                      length=length)
-    '''
+    """
+
 run()
