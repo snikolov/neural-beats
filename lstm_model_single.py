@@ -6,6 +6,7 @@ from datetime import datetime
 import itertools
 import json
 import os
+import shutil
 
 from keras import backend as K
 from keras.layers.core import Dense, Activation, Dropout
@@ -15,7 +16,7 @@ from keras.optimizers import RMSprop
 import numpy as np
 
 from midi_util import array_to_midi, print_array
-
+from trials import trial_name
 
 np.random.seed(10)
 
@@ -34,7 +35,7 @@ MIN_HITS = 8
 ########################################################################
 # Network architecture parameters.
 ########################################################################
-NUM_HIDDEN_UNITS = 700
+NUM_HIDDEN_UNITS = 512
 # The length of the phrase from which the predict the next symbol.
 PHRASE_LEN = 32
 # Dimensionality of the symbol space.
@@ -46,13 +47,20 @@ VALIDATION_PERCENT = 0.01
 
 #BASE_DIR = '/Users/snikolov/Dropbox/projects/neural-beats'
 BASE_DIR = '/home/ubuntu/neural-beats'
-MIDI_IN_DIR = os.path.join(BASE_DIR, 'midi_arrays/mega/')
+
+#MIDI_IN_DIR = os.path.join(BASE_DIR, 'midi_arrays/mega/')
+MIDI_IN_DIR = os.path.join(BASE_DIR, 'midi_arrays/mega/Electronic Live 9 SD/Jungle')
 #MIDI_IN_DIR = os.path.join(BASE_DIR, 'midi_arrays/mega/Rock Essentials 2 Live 9 SD/Preview Files/Fills/4-4 Fills')
+
 #MIDI_IN_DIR = BASE_DIR + '/' + 'mega-pack/array/Rock Essentials 2 Live 9 SD/Preview Files/Fills/4-4 Fills'
 #MIDI_IN_DIR = '/Users/snikolov/Downloads/groove-monkee-midi-gm/array'
+
 MODEL_OUT_DIR = os.path.join(BASE_DIR, 'models')
-MODEL_NAME = 'model-2016052-2'
-MIDI_OUT_DIR = os.path.join(MODEL_OUT_DIR, MODEL_NAME, 'gen-midi')
+MODEL_NAME = '2016-06-22-5'
+TRIAL_DIR = os.path.join(MODEL_OUT_DIR, MODEL_NAME)
+
+MIDI_OUT_DIR = os.path.join(TRIAL_DIR, 'gen-midi')
+
 LOAD_WEIGHTS = True
 
 
@@ -220,18 +228,15 @@ def generate(model, seed, mid_name, temperature=1.0, length=512):
     phrase = seed
     phrase_array = decode(phrase)
 
-    if type(temperature) == int:
-        temperature = (temperature for _ in xrange(length))
+    if not hasattr(temperature, '__len__'):
+        temperature = [temperature for _ in xrange(length)]
 
-    assert len(temperature) == length, 'Temperature schedule is of incorrect length ({})'.format(len(temperature))
-
-    for j in range(length):
-        print datetime.strftime(datetime.now(), '%Y-%m-%dT%H:%M:%S')
+    for temp in temperature:
         x = np.zeros((1, PHRASE_LEN, SYMBOL_DIM))
         for t, config_id in enumerate(phrase):
             x[0, t, config_id] = 1
         preds = model.predict(x, verbose=0)[0]
-        next_id = sample(preds, temperature[j])
+        next_id = sample(preds, temp)
 
         generated += [next_id]
         phrase = phrase[1:] + [next_id]
@@ -269,6 +274,21 @@ def init_model():
 def train(config_seq, train_generator, valid_generator):
     '''Train model and save weights.'''
 
+    # Create the trial directory.
+    os.makedirs(TRIAL_DIR)
+    # Copy the source file, with a version number, to the trial directory.
+    source_filename = __file__
+    versioned_source_filename = ''.join([
+        ''.join(source_filename.split('.')[:-1]),
+        '-' + datetime.strftime(datetime.now(), '%Y%m%d%H%M%S') + '.',
+        source_filename.split('.')[-1]
+    ])
+    shutil.copyfile(
+        source_filename,
+        os.path.join(TRIAL_DIR, versioned_source_filename))
+
+
+    # Initialize the model.
     model = init_model()
     print model.summary()
 
@@ -281,7 +301,7 @@ def train(config_seq, train_generator, valid_generator):
 
     if LOAD_WEIGHTS:
         print('Attempting to load previous weights...')
-        weights_path = os.path.join(MODEL_OUT_DIR, MODEL_NAME, MODEL_NAME)
+        weights_path = os.path.join(TRIAL_DIR, MODEL_NAME)
         if os.path.exists(weights_path):
             model.load_weights(weights_path)
 
@@ -305,10 +325,10 @@ def train(config_seq, train_generator, valid_generator):
         if best_val_loss is None or val_loss < best_val_loss:
             print 'Best validation loss so far. Saving...'
             best_val_loss = val_loss
-            model.save_weights(os.path.join(MODEL_OUT_DIR, MODEL_NAME, MODEL_NAME),
+            model.save_weights(os.path.join(TRIAL_DIR, MODEL_NAME),
                                overwrite=True)
         # Write history.
-        with open(os.path.join(MODEL_OUT_DIR, MODEL_NAME, 'history.jsonl'), 'a') as fp:
+        with open(os.path.join(TRIAL_DIR, 'history.jsonl'), 'a') as fp:
             json.dump(history.history, fp)
             fp.write('\n')
 
@@ -336,15 +356,17 @@ def train(config_seq, train_generator, valid_generator):
     return model
 
 
-def run():
-    #config_seq, train_generator, valid_generator = prepare_data()
-    #train(config_seq, train_generator, valid_generator)
+def run_train():
+    config_seq, train_generator, valid_generator = prepare_data()
+    train(config_seq, train_generator, valid_generator)
 
+def run_generate():
     print 'Loading model...'
     model = init_model()
-    model.load_weights(os.path.join(MODEL_OUT_DIR, MODEL_NAME, MODEL_NAME))
+    model.load_weights(os.path.join(TRIAL_DIR, MODEL_NAME))
     seed = np.zeros((32, 6))
 
+    """
     # Normal techno pattern
     seed[0,0] = 1 # Kick
     seed[4,2] = 1 # hat
@@ -356,17 +378,28 @@ def run():
     seed[22,2] = 1 # hat
     seed[24,0] = 1 # Kick
     seed[28,2] = 1 # hat
-
     """
+
     # Broken beat / electro pattern
     seed[0,0] = 1 # Kick
     seed[8,1] = 1 # Snare
     seed[12,0] = 1 # Kick
     seed[24,1] = 1 # Snare
     seed[30,1] = 1 # Snare
-    """
 
     print 'Generating...'
+    length = 512
+    for temperature in [0.7,0.9,1.1]:
+        print 'Temperature', temperature
+        for i in xrange(5):
+            print 'i', i
+            generate(model,
+                     encode(seed),
+                     'jungle2_{}_{}_{}.mid'.format(length, temperature, i),
+                     temperature=1.1,
+                     length=length)
+
+    """
     length = 32 * 16
     base_temperature = 0.7
     high_temperature = 2
@@ -375,6 +408,7 @@ def run():
     #temperature[1::16] = high_temperature
     #temperature[2::16] = high_temperature
     #temperature[3::16] = high_temperature
+
     for i in xrange(4):
         print 'pattern', i
         generate(model,
@@ -383,13 +417,5 @@ def run():
                  temperature=temperature,
                  length=length)
     """
-    for temperature in [0.7,0.9,1.1]:
-        for i in xrange(5):
-            generate(model,
-                     encode(seed),
-                     'out_electro_{}_{}_{}.mid'.format(length, temperature, i),
-                     temperature=1.1,
-                     length=length)
-    """
 
-run()
+run_generate()
