@@ -61,7 +61,7 @@ TRIAL_DIR = os.path.join(MODEL_OUT_DIR, MODEL_NAME)
 
 MIDI_OUT_DIR = os.path.join(TRIAL_DIR, 'gen-midi')
 
-LOAD_WEIGHTS = False
+LOAD_WEIGHTS = True
 
 
 # Encode each configuration of p pitches, each on or off, as a
@@ -235,7 +235,6 @@ def generate(model, seed, mid_name, temperature=1.0, length=512):
 
     generated = []
     phrase = seed
-    phrase_array = decode(phrase)
 
     if not hasattr(temperature, '__len__'):
         temperature = [temperature for _ in xrange(length)]
@@ -347,7 +346,7 @@ def train(config_sequences, train_generator, valid_generator):
 
         # Reset seed so we can compare generated patterns across iterations.
         np.random.seed(0)
-
+        
         sequence_indices = idx_seq_of_length(config_sequences, PHRASE_LEN)
         seq_index, phrase_start_index = sequence_indices[
             np.random.choice(len(sequence_indices))]
@@ -364,7 +363,6 @@ def train(config_sequences, train_generator, valid_generator):
                     phrase_start_index: phrase_start_index + PHRASE_LEN])
 
             print('----- Generating with temperature:', temperature)
-            phrase_array = decode(phrase)
 
             generate(model,
                      phrase,
@@ -384,6 +382,33 @@ def run_generate():
     model.load_weights(os.path.join(TRIAL_DIR, MODEL_NAME))
     seed = np.zeros((32, 6))
 
+
+    config_sequences, train_generator, valid_generator = prepare_data()
+    sequence_indices = idx_seq_of_length(config_sequences, PHRASE_LEN)
+
+
+    print 'Generating...'
+    length = 512
+    for i in xrange(5):
+        print 'i', i
+        np.random.seed(0)
+        seq_index, phrase_start_index = sequence_indices[
+            np.random.choice(len(sequence_indices))]
+
+        seed = list(
+            config_sequences[seq_index][
+                phrase_start_index: phrase_start_index + PHRASE_LEN])
+
+        for temperature in [0.5,0.9,1.5,2]:
+            print 'Temperature', temperature
+            generate(model,
+                     seed,
+                     'house_randseed_{}_{}_{}.mid'.format(length, temperature, i),
+                     temperature=temperature,
+                     length=length)
+
+
+    """
     # Normal techno pattern
     seed[0,0] = 1 # kick
     seed[4,2] = 1 # hat
@@ -395,7 +420,7 @@ def run_generate():
     seed[22,2] = 1 # hat
     seed[24,0] = 1 # kick
     seed[28,2] = 1 # hat
-
+    """
     """
     # Broken beat / electro pattern
     seed[0,0] = 1 # Kick
@@ -405,6 +430,7 @@ def run_generate():
     seed[30,1] = 1 # Snare
     """
 
+    """
     print 'Generating...'
     length = 512
     for temperature in [0.5,0.9,1.5,2]:
@@ -414,9 +440,10 @@ def run_generate():
             generate(model,
                      encode(seed),
                      'house_{}_{}_{}.mid'.format(length, temperature, i),
-                     temperature=1.1,
+                     temperature=temperature,
                      length=length)
-
+    """
+                     
     """
     length = 32 * 16
     base_temperature = 0.7
@@ -436,4 +463,4 @@ def run_generate():
                  length=length)
     """
 
-run_train()
+run_generate()
