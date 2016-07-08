@@ -463,4 +463,4 @@ def run_generate():
                  length=length)
     """
 
-run_generate()
+run_train()

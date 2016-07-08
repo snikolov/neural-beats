@@ -8,7 +8,7 @@ from mido import MidiFile, MidiTrack, Message, MetaMessage
 import numpy as np
 
 
-DEBUG = False
+DEBUG = True
 
 # The MIDI pitches we use.
 PITCHES = [36, 37, 38, 40, 41, 42, 44, 45, 46, 47, 49, 50, 58, 59, 60, 61, 62, 63, 64, 66]
@@ -79,7 +79,8 @@ def quantize_track(track, ticks_per_quarter, quantization):
     quantized_msgs = []
     for cum_time, msg in cum_msgs:
         if DEBUG:
-            print msg
+            print 'Message:', msg
+            print 'Open messages:'
             pp.pprint(open_msgs)
         if msg.type == 'note_on' and msg.velocity > 0:
             # Store until note off event. Note that there can be
@@ -102,8 +103,14 @@ def quantize_track(track, ticks_per_quarter, quantization):
             quantized_note_off_cum_time = quantized_note_on_cum_time + (cum_time - note_on_cum_time)
             quantized_msgs.append((min(end_of_track_cum_time, quantized_note_on_cum_time), note_on_msg))
             quantized_msgs.append((min(end_of_track_cum_time, quantized_note_off_cum_time), msg))
+
+            if DEBUG:
+                print 'Appended', quantized_msgs[-2:]
         elif msg.type == 'end_of_track':
             quantized_msgs.append((cum_time, msg))
+
+        if DEBUG:
+            print '\n'
 
     # Now, sort the quantized messages by (cumulative time,
     # note_type), making sure that note_on events come before note_off
@@ -164,7 +171,7 @@ def midi_to_array(mid, quantization):
     # Convert the note timing and velocity to an array.
     _, track = get_note_track(mid)
     ticks_per_quarter = mid.ticks_per_beat
-    
+
     time_msgs = [msg for msg in track if hasattr(msg, 'time')]
     cum_times = np.cumsum([msg.time for msg in time_msgs])
     track_len_ticks = cum_times[-1]
@@ -192,9 +199,9 @@ def midi_to_array(mid, quantization):
             continue
         if note_num in PITCHES_MAP:
             midi_array[position, PITCHES_MAP[note_num]] = velocity
-    
+
     return midi_array
-    
+
 
 def array_to_midi(array,
                   name,
@@ -215,7 +222,7 @@ def array_to_midi(array,
     pitch_offset -- Offset the pitch number relative to the array index.
     midi_type -- Type of MIDI format.
     ticks_per_quarter -- The number of MIDI timesteps per quarter note.'''
-    
+
     mid = MidiFile()
     meta_track = MidiTrack()
     note_track = MidiTrack()
