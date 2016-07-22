@@ -120,11 +120,12 @@ def quantize_track(track, ticks_per_quarter, quantization):
         key=lambda (cum_time, msg): cum_time
         if (msg.type=='note_on' and msg.velocity > 0) else cum_time + 0.5)
 
-    diff_times = [0] + list(
+    diff_times = [quantized_msgs[0][0]] + list(
         np.diff([ msg[0] for msg in quantized_msgs ]))
     for diff_time, (cum_time, msg) in zip(diff_times, quantized_msgs):
         quantized_track.append(msg.copy(time=diff_time))
     if DEBUG:
+        print 'Quantized messages:'
         pp.pprint(quantized_msgs)
         pp.pprint(diff_times)
     return quantized_track

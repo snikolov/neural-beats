@@ -15,6 +15,7 @@ from keras.models import Sequential
 from keras.optimizers import RMSprop
 import numpy as np
 
+from data import *
 from midi_util import array_to_midi, print_array
 
 np.random.seed(10)
@@ -52,11 +53,8 @@ BASE_DIR = '/Users/snikolov/Dropbox/projects/neural-beats'
 MIDI_IN_DIR = os.path.join(BASE_DIR, 'mega-pack/array/Electronic Live 9 SD/House')
 #MIDI_IN_DIR = os.path.join(BASE_DIR, 'midi_arrays/mega/Rock Essentials 2 Live 9 SD/Preview Files/Fills/4-4 Fills')
 
-#MIDI_IN_DIR = BASE_DIR + '/' + 'mega-pack/array/Rock Essentials 2 Live 9 SD/Preview Files/Fills/4-4 Fills'
-#MIDI_IN_DIR = '/Users/snikolov/Downloads/groove-monkee-midi-gm/array'
-
 MODEL_OUT_DIR = os.path.join(BASE_DIR, 'models')
-MODEL_NAME = '2016-06-26-1'
+MODEL_NAME = '2016-07-08'
 TRIAL_DIR = os.path.join(MODEL_OUT_DIR, MODEL_NAME)
 
 MIDI_OUT_DIR = os.path.join(TRIAL_DIR, 'gen-midi')
@@ -76,73 +74,6 @@ decodings = {
     i : config
     for i, config in enumerate(itertools.product([0,1], repeat=len(IN_PITCHES)))
 }
-
-class SequenceDataGenerator:
-    def __init__(self,
-                 sequences,
-                 phrase_length=64,
-                 batch_size=512,
-                 validation_percent=0.01,
-                 is_validation=False):
-        '''Initialize a SequenceDataGenerator.
-
-        Arguments:
-
-        sequences - The list of symbolic, integer sequences
-            representing different "songs."
-        phrase_length - The length of phrases to be generated
-            batch_size - The number of phrases to be generated.
-        '''
-
-        self.sequences = sequences
-        self.phrase_length = phrase_length
-        self.batch_size = batch_size
-
-        # Reset the random seed, so that a call to the constructor
-        # with is_validation=True followed by a call with
-        # is_validation=False produces two complementary sets of
-        # indices.
-        np.random.seed(0)
-
-        # Get the indices of all data points. A data point consists of
-        # a sequence of length phrase_length followed by the label, or
-        # next element in the sequence. Therefore, take all
-        # subsequences of length phrase_length + 1.
-        self.sequence_indices = idx_seq_of_length(self.sequences, phrase_length + 1)
-        n_points = len(self.sequence_indices)
-        if is_validation:
-            self.data_indices = np.arange(n_points)[
-                np.random.random(n_points) < validation_percent]
-        else:
-            self.data_indices = np.arange(n_points)[
-                np.random.random(n_points) >= validation_percent]
-
-        assert len(self.data_indices) > 0, 'No data selected for {}'.format(is_validation)
-
-
-    def gen(self):
-        '''Lazily generate an infinite stream of data batches.
-
-        Each batch is a tuple with two entries: BATCH_SIZE Xs and
-        BATCH_SIZE ys.
-        '''
-
-        while True:
-            X_batch = np.zeros((self.batch_size, self.phrase_length, SYMBOL_DIM))
-            y_batch = np.zeros((self.batch_size, SYMBOL_DIM))
-
-            for batch_idx in xrange(self.batch_size):
-                # Choose a random data point. Then extract the
-                # sequence and label corresponding to it.
-                seq_idx, phrase_start_idx = self.sequence_indices[
-                    np.random.choice(self.data_indices)]
-                X_batch[batch_idx,
-                        range(self.phrase_length),
-                        self.sequences[seq_idx][phrase_start_idx: phrase_start_idx + self.phrase_length]] = 1
-                y_batch[batch_idx,
-                        self.sequences[seq_idx][phrase_start_idx + self.phrase_length]] = 1
-
-            yield (X_batch, y_batch)
 
 
 def sample(a, temperature=1.0):
@@ -205,29 +136,19 @@ def prepare_data():
     # memory.
     train_generator = SequenceDataGenerator(config_sequences,
                                             phrase_length=PHRASE_LEN,
+                                            dim=SYMBOL_DIM,
                                             batch_size=BATCH_SIZE,
                                             is_validation=False,
                                             validation_percent=VALIDATION_PERCENT)
 
     valid_generator = SequenceDataGenerator(config_sequences,
                                             phrase_length=PHRASE_LEN,
+                                            dim=SYMBOL_DIM,
                                             batch_size=BATCH_SIZE,
                                             is_validation=True,
                                             validation_percent=VALIDATION_PERCENT)
 
     return config_sequences, train_generator, valid_generator
-
-
-def idx_seq_of_length(sequences, length):
-    '''List the start indices of all sequences of the given length. Each
-    start index is a pair of indices. The first specifies an element
-    of sequences and the second specifies the index within that
-    sequence.'''
-    indices = []
-    for i, seq in enumerate(sequences):
-        if len(seq) >= length:
-            indices.extend(itertools.product([i], range(len(seq) - length + 1)))
-    return indices
 
 
 def generate(model, seed, mid_name, temperature=1.0, length=512):
@@ -375,6 +296,7 @@ def train(config_sequences, train_generator, valid_generator):
 def run_train():
     config_sequences, train_generator, valid_generator = prepare_data()
     train(config_sequences, train_generator, valid_generator)
+
 
 def run_generate():
     print 'Loading model...'

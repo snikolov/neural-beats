@@ -5,20 +5,22 @@ import tests
 
 def test_quantize_track_simple():
     qtrack0 = quantize_track(tests.track0, 240, 5)
-    print qtrack0[0].time
-    print qtrack0[1].time
-    print qtrack0[2].time
     assert qtrack0[0].time == 0
     assert qtrack0[1].time == 0
     assert qtrack0[2].time == 50
 
     qtrack1 = quantize_track(tests.track1, 240, 5)
-    print qtrack1[0].time
-    print qtrack1[1].time
-    print qtrack1[2].time
     assert qtrack1[0].time == 0
     assert qtrack1[1].time == 0
     assert qtrack1[2].time == 50
+
+
+def test_quantize_track_end_time():
+    qtrack = quantize_track(tests.track2, 240, 5)
+    assert qtrack[0].time == 0
+    assert qtrack[1].time == 30
+    assert qtrack[2].time == 30
+    assert qtrack[3].time == 0
 
 
 def test_quantize():
